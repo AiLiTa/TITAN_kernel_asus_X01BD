@@ -42,6 +42,9 @@
 #include <linux/fb.h>
 #include <linux/notifier.h>
 #include <linux/sched.h>
+/* Huaqin modify for cpu_boost by leiyu at 2018/04/25 end */
+#include "../common/fingerprint_common.h"
+#include "../fingerprintd.h"
 
 typedef struct key_report {
 	int key;
@@ -667,41 +670,39 @@ static struct miscdevice st_cdfinger_dev = {
 static int cdfinger_fb_notifier_callback(struct notifier_block* self,
 										unsigned long event, void* data)
 {
-	struct fb_event* evdata = data;
-	unsigned int blank;
-	int retval = 0;
-
-	if (event != FB_EVENT_BLANK /* FB_EARLY_EVENT_BLANK */) {
-		return 0;
-	}
-
-	blank = *(int*)evdata->data;
-
-	switch (blank) {
-		case FB_BLANK_UNBLANK:
-			mutex_lock(&g_cdfingerfp_data->buf_lock);
-			screen_status = 1;
-			if (isInKeyMode == 0)
-				cdfinger_async_report();
-			mutex_unlock(&g_cdfingerfp_data->buf_lock);
+    struct fb_event* evdata = data;
+    unsigned int blank;
+    int retval = 0;
+	
+    if (event != FB_EVENT_BLANK /* FB_EARLY_EVENT_BLANK */) {
+        return 0;
+    }
+    blank = *(int*)evdata->data;
+    switch (blank) {
+        case FB_BLANK_UNBLANK:
+		set_fingerprintd_nice(0);
+		mutex_lock(&g_cdfingerfp_data->buf_lock);
+		screen_status = 1;
+		if (isInKeyMode == 0)
+			cdfinger_async_report();
+		mutex_unlock(&g_cdfingerfp_data->buf_lock);
 #if 0
 			sched_set_boost(0);
 #endif
-			break;
+            break;
+        case FB_BLANK_POWERDOWN:
+		set_fingerprintd_nice(MIN_NICE);
+		mutex_lock(&g_cdfingerfp_data->buf_lock);
+		screen_status = 0;
+		if (isInKeyMode == 0)
+			cdfinger_async_report();
+		mutex_unlock(&g_cdfingerfp_data->buf_lock);
+            break;
+        default:
+            break;
+    }
 
-		case FB_BLANK_POWERDOWN:
-			mutex_lock(&g_cdfingerfp_data->buf_lock);
-			screen_status = 0;
-			if (isInKeyMode == 0)
-				cdfinger_async_report();
-			mutex_unlock(&g_cdfingerfp_data->buf_lock);
-			break;
-
-		default:
-			break;
-	}
-
-	return retval;
+    return retval;
 }
 #ifdef SUPPORT_ID_NUM
 static int cdfinger_support_id(struct cdfingerfp_data *cdfinger)
