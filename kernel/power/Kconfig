@@ -45,13 +45,6 @@ config POWERSUSPEND
 	  Call early suspend handlers when the user requested sleep state
 	  changes.
 
-config POWERSUSPEND
-	bool "Power suspend"
-	default y
-	---help---
-	  Call early suspend handlers when the user requested sleep state
-	  changes.
-
 config POWERSUSPEND_DEBUG
 	bool "Powersuspend driver debugging code"
 	depends on POWERSUSPEND
@@ -378,15 +371,7 @@ config QUICK_WAKEUP
 	  Allow kernel driver to do periodic jobs without resuming the full system
 	  This option can increase battery life on android powered smartphone.
 
-config POWERSUSPEND
-	bool "Power suspend"
+config	BOEFFLA_WL_BLOCKER
+	bool "Boeffla generic wakelock blocker driver"
+	depends on PM
 	default y
-	---help---
-	  Call early suspend handlers when the user requested sleep state
-	  changes.
-
-config POWERSUSPEND_DEBUG
-	bool "Powersuspend driver debugging code"
-	depends on POWERSUSPEND
-	help
-	  Output debugging info in dmesg
