@@ -20,6 +20,7 @@ struct boost_dev {
 	unsigned long boost_freq;
 	unsigned long max_boost_expires;
 	unsigned long max_boost_jiffies;
+	bool disable;
 	spinlock_t lock;
 };
 
