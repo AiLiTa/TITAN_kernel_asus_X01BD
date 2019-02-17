@@ -26,7 +26,8 @@
 
 #include <drm/drm_crtc.h>
 
-#include "drm/drmP.h"
+#include <drm/drm_bridge.h>
+#include <drm/drmP.h>
 
 /**
  * DOC: overview
@@ -111,6 +112,7 @@ int drm_bridge_attach(struct drm_device *dev, struct drm_bridge *bridge)
 		return -EBUSY;
 
 	bridge->dev = dev;
+	dev->bridge = bridge;
 
 	if (bridge->funcs->attach)
 		return bridge->funcs->attach(bridge);
@@ -130,9 +132,30 @@ EXPORT_SYMBOL(drm_bridge_attach);
  * When creating a bridge driver, one can implement drm_bridge_funcs op with
  * the help of these rough rules:
  *
- * pre_enable: this contains things needed to be done for the bridge before
- * its clock and timings are enabled by its source. For a bridge, its source
- * is generally the encoder or bridge just before it in the encoder chain.
+ * Note that tearing down links between the bridge and our encoder/bridge
+ * objects needs to be handled by the kms driver itself.
+ */
+void drm_bridge_detach(struct drm_bridge *bridge)
+{
+	if (WARN_ON(!bridge))
+		return;
+
+	if (WARN_ON(!bridge->dev))
+		return;
+
+	if (bridge->funcs->detach)
+		bridge->funcs->detach(bridge);
+
+	bridge->dev->bridge = NULL;
+	bridge->dev = NULL;
+}
+EXPORT_SYMBOL(drm_bridge_detach);
+
+/**
+ * drm_bridge_connector_init - call bridge's connector_init callback to allow
+ *                     the bridge to update connector's behavior.
+ * @bridge: bridge control structure
+ * @connector: connector control structure
  *
  * enable: this contains things needed to be done for the bridge once its
  * source is enabled. In other words, enable is called once the source is
@@ -203,7 +226,10 @@ void drm_bridge_disable(struct drm_bridge *bridge)
 
 	drm_bridge_disable(bridge->next);
 
-	bridge->funcs->disable(bridge);
+	if (bridge->funcs->disable)
+		bridge->funcs->disable(bridge);
+
+	atomic_set(&bridge->dev->bridges_enabled, 0);
 }
 EXPORT_SYMBOL(drm_bridge_disable);
 
@@ -255,6 +281,17 @@ void drm_bridge_mode_set(struct drm_bridge *bridge,
 }
 EXPORT_SYMBOL(drm_bridge_mode_set);
 
+void __drm_bridge_pre_enable(struct drm_bridge *bridge)
+{
+	if (!bridge)
+		return;
+
+	__drm_bridge_pre_enable(bridge->next);
+
+	if (bridge->funcs->pre_enable)
+		bridge->funcs->pre_enable(bridge);
+}
+
 /**
  * drm_bridge_pre_enable - calls 'pre_enable' drm_bridge_funcs op for all
  *			   bridges in the encoder chain.
@@ -271,11 +308,21 @@ void drm_bridge_pre_enable(struct drm_bridge *bridge)
 	if (!bridge)
 		return;
 
-	drm_bridge_pre_enable(bridge->next);
-
-	bridge->funcs->pre_enable(bridge);
+	drm_bridge_enable_all(bridge->dev);
+	kthread_flush_work(&bridge->dev->bridge_enable_work);
 }
 EXPORT_SYMBOL(drm_bridge_pre_enable);
+
+void __drm_bridge_enable(struct drm_bridge *bridge)
+{
+	if (!bridge)
+		return;
+
+	if (bridge->funcs->enable)
+		bridge->funcs->enable(bridge);
+
+	__drm_bridge_enable(bridge->next);
+}
 
 /**
  * drm_bridge_enable - calls 'enable' drm_bridge_funcs op for all bridges
@@ -293,11 +340,19 @@ void drm_bridge_enable(struct drm_bridge *bridge)
 	if (!bridge)
 		return;
 
-	bridge->funcs->enable(bridge);
-
-	drm_bridge_enable(bridge->next);
+	drm_bridge_enable_all(bridge->dev);
+	kthread_flush_work(&bridge->dev->bridge_enable_work);
 }
 EXPORT_SYMBOL(drm_bridge_enable);
+
+void drm_bridge_enable_all(struct drm_device *dev)
+{
+	if (atomic_cmpxchg(&dev->bridges_enabled, 0, 1))
+		return;
+
+	kthread_queue_work(&dev->bridge_enable_worker,
+			   &dev->bridge_enable_work);
+}
 
 #ifdef CONFIG_OF
 /**
