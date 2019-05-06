@@ -60,11 +60,6 @@
 #define PSCI_AFFINITY_LEVEL(lvl) ((lvl & 0x3) << 24)
 static remote_spinlock_t scm_handoff_lock;
 
-enum {
-	MSM_LPM_LVL_DBG_SUSPEND_LIMITS = BIT(0),
-	MSM_LPM_LVL_DBG_IDLE_LIMITS = BIT(1),
-};
-
 struct lpm_cluster *lpm_root_node;
 
 #define MAXSAMPLES 5
@@ -101,7 +96,6 @@ static DEFINE_PER_CPU(struct lpm_cluster*, cpu_cluster);
 static bool suspend_in_progress;
 static struct hrtimer lpm_hrtimer;
 static struct hrtimer histtimer;
-static const int num_dbg_elements = 0x100;
 static int lpm_cpu_callback(struct notifier_block *cpu_nb,
 				unsigned long action, void *hcpu);
 
@@ -140,6 +134,140 @@ void lpm_suspend_wake_time(uint64_t wakeup_time)
 }
 EXPORT_SYMBOL(lpm_suspend_wake_time);
 
+static uint32_t least_cluster_latency(struct lpm_cluster *cluster,
+					struct latency_level *lat_level)
+{
+	struct list_head *list;
+	struct lpm_cluster_level *level;
+	struct lpm_cluster *n;
+	struct power_params *pwr_params;
+	uint32_t latency = 0;
+	int i;
+
+	if (!cluster->list.next) {
+		for (i = 0; i < cluster->nlevels; i++) {
+			level = &cluster->levels[i];
+			pwr_params = &level->pwr;
+			if (lat_level->reset_level == level->reset_level) {
+				if ((latency > pwr_params->latency_us)
+						|| (!latency))
+					latency = pwr_params->latency_us;
+				break;
+			}
+		}
+	} else {
+		list_for_each(list, &cluster->parent->child) {
+			n = list_entry(list, typeof(*n), list);
+			if (lat_level->level_name) {
+				if (strcmp(lat_level->level_name,
+						 n->cluster_name))
+					continue;
+			}
+			for (i = 0; i < n->nlevels; i++) {
+				level = &n->levels[i];
+				pwr_params = &level->pwr;
+				if (lat_level->reset_level ==
+						level->reset_level) {
+					if ((latency > pwr_params->latency_us)
+								|| (!latency))
+						latency =
+						pwr_params->latency_us;
+					break;
+				}
+			}
+		}
+	}
+	return latency;
+}
+
+static uint32_t least_cpu_latency(struct list_head *child,
+				struct latency_level *lat_level)
+{
+	struct list_head *list;
+	struct lpm_cpu_level *level;
+	struct power_params *pwr_params;
+	struct lpm_cpu *cpu;
+	struct lpm_cluster *n;
+	uint32_t latency = 0;
+	int i;
+
+	list_for_each(list, child) {
+		n = list_entry(list, typeof(*n), list);
+		if (lat_level->level_name) {
+			if (strcmp(lat_level->level_name, n->cluster_name))
+				continue;
+		}
+		cpu = n->cpu;
+		for (i = 0; i < cpu->nlevels; i++) {
+			level = &cpu->levels[i];
+			pwr_params = &level->pwr;
+			if (lat_level->reset_level == level->reset_level) {
+				if ((latency > pwr_params->latency_us)
+							|| (!latency))
+					latency = pwr_params->latency_us;
+				break;
+			}
+		}
+	}
+	return latency;
+}
+
+static struct lpm_cluster *cluster_aff_match(struct lpm_cluster *cluster,
+							int affinity_level)
+{
+	struct lpm_cluster *n;
+
+	if ((cluster->aff_level == affinity_level)
+		|| ((cluster->cpu) && (affinity_level == 0)))
+		return cluster;
+	else if (!cluster->cpu) {
+		n =  list_entry(cluster->child.next, typeof(*n), list);
+		return cluster_aff_match(n, affinity_level);
+	} else
+		return NULL;
+}
+
+int lpm_get_latency(struct latency_level *level, uint32_t *latency)
+{
+	struct lpm_cluster *cluster;
+	uint32_t val;
+
+	if (!lpm_root_node) {
+		pr_err("%s: lpm_probe not completed\n", __func__);
+		return -EAGAIN;
+	}
+
+	if ((level->affinity_level < 0)
+		|| (level->affinity_level > lpm_root_node->aff_level)
+		|| (level->reset_level < LPM_RESET_LVL_RET)
+		|| (level->reset_level > LPM_RESET_LVL_PC)
+		|| !latency)
+		return -EINVAL;
+
+	cluster = cluster_aff_match(lpm_root_node, level->affinity_level);
+	if (!cluster) {
+		pr_err("%s:No matching cluster found for affinity_level:%d\n",
+					__func__, level->affinity_level);
+		return -EINVAL;
+	}
+
+	if (level->affinity_level == 0)
+		val = least_cpu_latency(&cluster->parent->child, level);
+	else
+		val = least_cluster_latency(cluster, level);
+
+	if (!val) {
+		pr_err("%s:No mode with affinity_level:%d reset_level:%d\n",
+			__func__, level->affinity_level, level->reset_level);
+		return -EINVAL;
+	}
+
+	*latency = val;
+
+	return 0;
+}
+EXPORT_SYMBOL(lpm_get_latency);
+
 static int lpm_cpu_callback(struct notifier_block *cpu_nb,
 	unsigned long action, void *hcpu)
 {
@@ -148,11 +276,11 @@ static int lpm_cpu_callback(struct notifier_block *cpu_nb,
 
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_DYING:
-		cluster_prepare(cluster, get_cpu_mask(cpu),
+		cluster_prepare(cluster, get_cpu_mask((unsigned int) cpu),
 					NR_LPM_LEVELS, false, 0);
 		break;
 	case CPU_STARTING:
-		cluster_unprepare(cluster, get_cpu_mask(cpu),
+		cluster_unprepare(cluster, get_cpu_mask((unsigned int) cpu),
 					NR_LPM_LEVELS, false, 0);
 		break;
 	default:
@@ -923,6 +1051,9 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 	}
 
 	if (idx != cluster->default_level) {
+		trace_cluster_enter(cluster->cluster_name, idx,
+			cluster->num_children_in_sync.bits[0],
+			cluster->child_cpus.bits[0], from_idle);
 		lpm_stats_cluster_enter(cluster->stats, idx);
 
 		if (from_idle && lpm_prediction)
@@ -1123,6 +1254,10 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 		lpm_wa_cx_unvote_send();
 		msm_mpm_exit_sleep(from_idle);
 	}
+
+	trace_cluster_exit(cluster->cluster_name, cluster->last_level,
+			cluster->num_children_in_sync.bits[0],
+			cluster->child_cpus.bits[0], from_idle);
 
 	last_level = cluster->last_level;
 	cluster->last_level = cluster->default_level;
@@ -1609,6 +1744,14 @@ static int lpm_suspend_enter(suspend_state_t state)
 	cpu_prepare(cluster, idx, false);
 	cluster_prepare(cluster, cpumask, idx, false, 0);
 
+	/*
+	 * Print the clocks which are enabled during system suspend
+	 * This debug information is useful to know which are the
+	 * clocks that are enabled and preventing the system level
+	 * LPMs(XO and Vmin).
+	 */
+	clock_debug_print_enabled();
+
 	BUG_ON(!use_psci);
 	psci_enter_sleep(cluster, idx, true);
 
@@ -1722,3 +1865,52 @@ fail:
 	return rc;
 }
 late_initcall(lpm_levels_module_init);
+
+enum msm_pm_l2_scm_flag lpm_cpu_pre_pc_cb(unsigned int cpu)
+{
+	struct lpm_cluster *cluster = per_cpu(cpu_cluster, cpu);
+	enum msm_pm_l2_scm_flag retflag = MSM_SCM_L2_ON;
+
+	/*
+	 * No need to acquire the lock if probe isn't completed yet
+	 * In the event of the hotplug happening before lpm probe, we want to
+	 * flush the cache to make sure that L2 is flushed. In particular, this
+	 * could cause incoherencies for a cluster architecture. This wouldn't
+	 * affect the idle case as the idle driver wouldn't be registered
+	 * before the probe function
+	 */
+	if (!cluster)
+		return MSM_SCM_L2_OFF;
+
+	/*
+	 * Assumes L2 only. What/How parameters gets passed into TZ will
+	 * determine how this function reports this info back in msm-pm.c
+	 */
+	spin_lock(&cluster->sync_lock);
+
+	if (!cluster->lpm_dev) {
+		retflag = MSM_SCM_L2_OFF;
+		goto unlock_and_return;
+	}
+
+	if (!cpumask_equal(&cluster->num_children_in_sync,
+						&cluster->child_cpus))
+		goto unlock_and_return;
+
+	if (cluster->lpm_dev)
+		retflag = cluster->lpm_dev->tz_flag;
+	/*
+	 * The scm_handoff_lock will be release by the secure monitor.
+	 * It is used to serialize power-collapses from this point on,
+	 * so that both Linux and the secure context have a consistent
+	 * view regarding the number of running cpus (cpu_count).
+	 *
+	 * It must be acquired before releasing the cluster lock.
+	 */
+unlock_and_return:
+	trace_pre_pc_cb(retflag);
+	remote_spin_lock_rlock_id(&scm_handoff_lock,
+				  REMOTE_SPINLOCK_TID_START + cpu);
+	spin_unlock(&cluster->sync_lock);
+	return retflag;
+}
