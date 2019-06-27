@@ -58,6 +58,8 @@ module_param_named(adreno_idler_downdifferential, downdifferential, uint, 0664);
 static bool adreno_idler_active = true;
 module_param_named(adreno_idler_active, adreno_idler_active, bool, 0664);
 
+static unsigned int idlecount = 0;
+
 static inline int64_t get_time_inms(void) {
 	int64_t tinms;
 	struct timespec cur_time = current_kernel_time();
