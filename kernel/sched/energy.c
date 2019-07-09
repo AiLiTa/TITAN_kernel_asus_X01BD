@@ -145,9 +145,6 @@ static int sched_energy_probe(struct platform_device *pdev)
 	unsigned long *max_frequencies = NULL;
 	int ret;
 
-	if (!sched_is_energy_aware())
-		return 0;
-
 	max_frequencies = kmalloc_array(nr_cpu_ids, sizeof(unsigned long),
 					GFP_KERNEL);
 	if (!max_frequencies) {
