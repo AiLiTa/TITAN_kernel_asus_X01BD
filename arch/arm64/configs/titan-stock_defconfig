@@ -363,6 +363,7 @@ CONFIG_INPUT_MISC=y
 #Huaqin modify for disable hbtp by zhengwu.lu at 2018/01/26 start
 # CONFIG_INPUT_HBTP_INPUT is not set
 #Huaqin modify for disable hbtp by zhengwu.lu at 2018/01/26 end
+CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
 CONFIG_INPUT_QPNP_POWER_ON=y
 CONFIG_INPUT_UINPUT=y
 CONFIG_INPUT_STMVL53L0=y
