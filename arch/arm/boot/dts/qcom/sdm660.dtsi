@@ -2776,3 +2776,4 @@
 
 #include "sdm660-mdss.dtsi"
 #include "sdm660-mdss-pll.dtsi"
+#include "X01BD/X01BD-sdm660-thermal.dtsi"
