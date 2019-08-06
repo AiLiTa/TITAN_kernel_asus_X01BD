@@ -469,6 +469,13 @@ static int msm_lmh_dcvs_probe(struct platform_device *pdev)
 	hw->default_hi.trip = THERMAL_TRIP_CONFIGURABLE_HI;
 	hw->default_hi.notify = trip_notify;
 
+	if (!IS_ENABLED(CONFIG_QTI_THERMAL_LIMITS_DCVS)) {
+		limits_isens_vref_ldo_init(pdev, hw);
+		devm_kfree(&pdev->dev, hw->cdev_data);
+		devm_kfree(&pdev->dev, hw);
+		return 0;
+	}
+
 	/*
 	 * Setup virtual thermal zones for each LMH-DCVS hardware
 	 * The sensor does not do actual thermal temperature readings
