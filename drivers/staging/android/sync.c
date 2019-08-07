@@ -681,7 +681,6 @@ static long sync_fence_ioctl_fence_info(struct sync_fence *fence,
 
 #ifdef CONFIG_SYNC_DEBUG
 	strlcpy(data->name, fence->name, sizeof(data->name));
-#endif
 	data->status = atomic_read(&fence->status);
 	if (data->status >= 0)
 		data->status = !data->status;
