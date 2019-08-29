@@ -12,7 +12,7 @@ KERNEL_DEFCONFIG=titan-stock_defconfig
 ZIP_DIR=$PWD/../AnyKernel3/
 SYSTEM_MOD=$PWD/../AnyKernel3/modules/system/lib/modules/
 VENDOR_MOD=$PWD/../AnyKernel3/modules/vendor/lib/modules/qca_cld3
-FINAL_KERNEL_ZIP=Titan_$RELEASE.zip
+FINAL_KERNEL_ZIP=tiTan-$RELEASE.zip
 FINAL_DIR=$PWD/../Kernel
 
 BUILD_START=$(date +"%s")
