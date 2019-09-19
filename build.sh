@@ -7,7 +7,7 @@ RELEASE="$(cat release)-$(date +%F | sed s@-@@g)"
 ## Copy this script inside the kernel directory
 KERNEL_DIR=$PWD
 KERNEL_TOOLCHAIN=$PWD/../aarch64-linux-android-4.9/bin
-CLANG_TOOLCHAIN=$PWD/../android-9.0.6-clang/bin
+CLANG_TOOLCHAIN=$PWD/../android-9.0.7-clang/bin
 KERNEL_DEFCONFIG=titan-stock_defconfig
 ZIP_DIR=$PWD/../AnyKernel3/
 SYSTEM_MOD=$PWD/../AnyKernel3/modules/system/lib/modules/
